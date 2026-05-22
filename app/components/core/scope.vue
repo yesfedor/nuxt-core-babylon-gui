@@ -2,6 +2,13 @@
 import { onMounted, provide, ref, shallowRef } from 'vue'
 import { xrRoutes } from '../xr/views/routes'
 import { resolvePreferredXRMode, type XRSessionMode } from '../xr/utils/webxr-check'
+// CRITICAL: XrAppRouterView must be a SYNCHRONOUS import. Nuxt's `Lazy*`
+// prefix wraps the component in `defineAsyncComponent`, which produces an
+// `AsyncComponentWrapper`. Inside our XR custom renderer that wrapper breaks
+// the parent/container chain — the root template element of the resolved
+// view arrives at `insert()` with `parent === null`, so the view never
+// attaches to GUI3DManager.
+import XrAppRouterView from '../xr/app/router-view.vue'
 
 interface Props {
   /** The name of the user-scope provider. */
@@ -86,7 +93,7 @@ const onInitFailed = (err: unknown): void => {
           @session-ended="onSessionEnded"
           @init-failed="onInitFailed"
         >
-          <LazyXrAppRouterView />
+          <XrAppRouterView />
         </LazyXrCoreProvider>
 
         <LazyXrBridgeEnterButton

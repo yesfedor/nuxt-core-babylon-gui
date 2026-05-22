@@ -20,6 +20,7 @@ import { createApp as createXRApp } from '../app/index'
 import type { XRNode, XRRootContainer } from '../app/types'
 import { xrRouter, type XRRoute } from '../app/route'
 import type { XRSessionMode } from '../utils/webxr-check'
+import { xrLogger } from '../../utils/logger'
 
 type XRApp = ReturnType<typeof createXRApp>
 type XRRootElement = HTMLDivElement & XRRootContainer
@@ -61,10 +62,9 @@ let xrApp: XRApp | null = null
 onMounted(async () => {
   if (!renderCanvas.value) return
 
-  const localEngine = new BABYLON.Engine(renderCanvas.value, true, {
-    preserveDrawingBuffer: true,
-    stencil: true,
-  })
+  // `preserveDrawingBuffer` and `stencil` are off — both cost an extra
+  // framebuffer copy per eye in stereo and we don't need either.
+  const localEngine = new BABYLON.Engine(renderCanvas.value, true)
   const localScene = new BABYLON.Scene(localEngine)
   engine.value = localEngine
   scene.value = localScene
@@ -101,8 +101,14 @@ onMounted(async () => {
     const rootContainer = document.createElement('div') as XRRootElement
     rootContainer.__isXRRoot = true
     rootContainer.gui3DManager = gui3DManager.value
-    rootContainer.advancedTexture = GUI.AdvancedDynamicTexture.CreateFullscreenUI('xr-root-fullscreen-ui')
+    rootContainer.advancedTexture = null
     rootContainer.scene = localScene
+    rootContainer.ensureAdvancedTexture = () => {
+      if (!rootContainer.advancedTexture) {
+        rootContainer.advancedTexture = GUI.AdvancedDynamicTexture.CreateFullscreenUI('xr-root-fullscreen-ui')
+      }
+      return rootContainer.advancedTexture
+    }
 
     xrApp = createXRApp({
       name: 'XRRoot',
@@ -120,11 +126,15 @@ onMounted(async () => {
     }
 
     xrApp.mount(rootContainer as unknown as XRNode)
+    xrLogger.log('provider mounted — gui3D rootChildren=', gui3DManager.value.rootContainer.children.length, 'mode=', props.mode)
 
     helper.baseExperience.onStateChangedObservable.add((state) => {
       if (state === BABYLON.WebXRState.IN_XR) {
         isXRActive.value = true
         emit('session-started')
+        xrLogger.log('IN_XR — gui3D rootChildren=',
+          gui3DManager.value?.rootContainer.children.length,
+          'meshes=', localScene.meshes.length)
       } else if (state === BABYLON.WebXRState.NOT_IN_XR) {
         isXRActive.value = false
         emit('session-ended')
@@ -151,6 +161,9 @@ onBeforeUnmount(() => {
     xrApp.unmount()
     xrApp = null
   }
+  gui3DManager.value?.dispose()
+  // Engine.dispose tears down the WebGL context and frees all GPU resources;
+  // it also disposes scene meshes and any ADTs backed by render textures.
   engine.value?.dispose()
   engine.value = null
   scene.value = null

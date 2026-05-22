@@ -27,7 +27,15 @@ export interface XRObserverHandle {
 export interface XRRootContainer {
   __isXRRoot: true
   gui3DManager: GUI.GUI3DManager
-  advancedTexture: GUI.AdvancedDynamicTexture
+  /**
+   * Lazy fullscreen ADT for 2D controls placed directly at the XR root.
+   * Stays `null` while no such child exists — a permanent fullscreen ADT in a
+   * WebXR session renders twice per frame (one pass per eye) and pegs the
+   * GPU even when empty.
+   */
+  advancedTexture: GUI.AdvancedDynamicTexture | null
+  /** Factory invoked the first time the renderer needs the fullscreen ADT. */
+  ensureAdvancedTexture: () => GUI.AdvancedDynamicTexture
   scene: BABYLON.Scene
 }
 

@@ -5,21 +5,15 @@ import { isXRRootContainer, type XRComponentType, type XRNode, type XRNodeType, 
 import { destroyNode } from '../composables/useXRObservable'
 import { xrComponentRegistry } from './registry'
 import { flushPendingVectorProps, patchXRProp } from './props'
+import { xrLogger } from '../../utils/logger'
 
-// --- TEMPORARY DIAGNOSTIC LOGS ---
-// Remove after the rendering pipeline is confirmed working.
-const DEBUG_XR = true
-const xlog = (...args: unknown[]): void => {
-  if (DEBUG_XR) console.log('[xr]', ...args)
-}
-const describe = (n: XRParent): string => {
+function describeParent(n: XRParent): string {
   if (!n) return 'null'
   if (isXRRootContainer(n)) return 'ROOT'
   const node = n as XRNode
   const inst = node.instance as { _host?: unknown, name?: string } | null
   return `${node.type}${inst?.name ? `(${inst.name})` : ''}${inst?._host ? '+host' : ''}`
 }
-// ---
 
 type AnyRecord = Record<string, unknown>
 
@@ -60,17 +54,27 @@ function hasHost(instance: unknown): boolean {
 }
 
 function attachChildToParent(parentNode: XRNode, child: XRNode): void {
-  if (!child.instance || !parentNode.instance) return
+  if (!child.instance || !parentNode.instance) {
+    xrLogger.log('attach SKIP', child.type, '→', parentNode.type,
+      'reason:', !child.instance ? 'no-child-inst' : 'no-parent-inst')
+    return
+  }
 
   if (isButtonMenuParent(parentNode.type)) {
     const buttonContainer = asButtonContainer(parentNode.instance)
     if (buttonContainer) {
       buttonContainer.addButton(child.instance)
+      xrLogger.log('attach via addButton', child.type, '→', parentNode.type)
+    } else {
+      xrLogger.log('attach MISS-addButton on', parentNode.type)
     }
   } else {
     const container = asContainer(parentNode.instance)
     if (container) {
       container.addControl(child.instance)
+      xrLogger.log('attach via addControl', child.type, '→', parentNode.type)
+    } else {
+      xrLogger.log('attach MISS-addControl on', parentNode.type)
     }
   }
 
@@ -84,6 +88,7 @@ function attachChildToParent(parentNode: XRNode, child: XRNode): void {
 function drainPendingChildren(parent: XRNode): void {
   const queue = parent._pendingChildren
   if (!queue || queue.length === 0) return
+  xrLogger.log('drain', parent.type, 'count=', queue.length)
   // Take ownership and clear early so nested attaches don't see stale state.
   parent._pendingChildren = undefined
   for (const child of queue) {
@@ -238,7 +243,7 @@ export const { render, createApp } = createRenderer<XRComponentType, XRComponent
   createElement(type, _isSVG, _isCustom, _props): XRComponentType {
     const componentDef = xrComponentRegistry[type]
     if (!componentDef) {
-      xlog('createElement UNKNOWN', type)
+      xrLogger.log('createElement UNKNOWN', type)
       return { type: 'unknown', instance: null }
     }
     const node: XRNode = {
@@ -246,7 +251,7 @@ export const { render, createApp } = createRenderer<XRComponentType, XRComponent
       instance: componentDef.factory(),
       _pool: componentDef.pool ?? null,
     }
-    xlog('createElement', componentDef.type)
+    xrLogger.log('createElement', componentDef.type)
     return node
   },
 
@@ -254,18 +259,29 @@ export const { render, createApp } = createRenderer<XRComponentType, XRComponent
     if (!el) return
     el.parent = parent as XRParent
 
-    if (!el.instance || el.isFragment || el.nodeType === 'comment' || el.nodeType === 'text') return
-    if (!parent) return
+    if (!el.instance || el.isFragment || el.nodeType === 'comment' || el.nodeType === 'text') {
+      xrLogger.log('insert SKIP', el?.type, '→', describeParent(parent as XRParent), 'reason:',
+        !el.instance ? 'no-instance' : el.nodeType ?? 'fragment')
+      return
+    }
+    if (!parent) {
+      xrLogger.log('insert NO-PARENT', el.type)
+      return
+    }
+
+    xrLogger.log('insert', el.type, '→', describeParent(parent as XRParent))
 
     // 1. Mount into XR root container
     if (isXRRootContainer(parent)) {
       if (isType3D(el.type)) {
         parent.gui3DManager.addControl(el.instance as GUI.Control3D)
+        xrLogger.log('  → root.gui3DManager.addControl OK, pending=', el._pendingChildren?.length ?? 0)
         flushPendingVectorProps(el)
         flushContentDisplay(el)
         drainPendingChildren(el)
       } else if (isType2D(el.type)) {
-        parent.advancedTexture.addControl(el.instance as GUI.Control)
+        parent.ensureAdvancedTexture().addControl(el.instance as GUI.Control)
+        xrLogger.log('  → root.advancedTexture.addControl OK')
         flushPendingVectorProps(el)
         drainPendingChildren(el)
       }
@@ -300,11 +316,13 @@ export const { render, createApp } = createRenderer<XRComponentType, XRComponent
     //    crashes. Buffer; the parent will drain when it attaches.
     if (isType3D(parentNode.type) && !hasHost(parentInst)) {
       ;(parentNode._pendingChildren ??= []).push(el)
+      xrLogger.log('  → DEFERRED (parent has no _host yet), pendingCount=', parentNode._pendingChildren.length)
       applyDeferredProps(el)
       return
     }
 
     // 5. Attach via the right channel (button-menu vs Container3D vs 2D).
+    xrLogger.log('  → attachChildToParent')
     attachChildToParent(parentNode, el)
   },
 
@@ -318,7 +336,7 @@ export const { render, createApp } = createRenderer<XRComponentType, XRComponent
       const parent = el.parent
       if (parent && isXRRootContainer(parent)) {
         if (isType3D(el.type)) parent.gui3DManager.removeControl(el.instance as GUI.Control3D)
-        else if (isType2D(el.type)) parent.advancedTexture.removeControl(el.instance as GUI.Control)
+        else if (isType2D(el.type)) parent.advancedTexture?.removeControl(el.instance as GUI.Control)
       } else if (parent) {
         // TouchHolographicMenu doesn't expose removeButton; the inherited
         // Container3D.removeControl handles detachment correctly.
