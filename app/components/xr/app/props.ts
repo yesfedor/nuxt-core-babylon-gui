@@ -1,11 +1,10 @@
 import * as BABYLON from '@babylonjs/core'
-import type { XRNode } from './types'
+import type { XRNode, XRObserverHandle } from './types'
 
 type AnyRecord = Record<string, unknown>
 type EventCallback = (...args: unknown[]) => void
-type ObservableLike = { add: (cb: EventCallback) => BABYLON.Observer<unknown> }
 
-const VECTOR3_KEYS = new Set(['position', 'rotation', 'scale', 'scaling'])
+const VECTOR3_KEYS = new Set(['position', 'rotation', 'scaling'])
 const VECTOR2_KEYS = new Set(['dimensions', 'minDimensions'])
 
 const OBSERVABLE_MAP: Record<string, string> = {
@@ -22,45 +21,61 @@ const OBSERVABLE_MAP: Record<string, string> = {
   blur: 'onBlurObservable',
 }
 
-function resolveVectorTarget(instance: AnyRecord, fieldKey: string): unknown {
+// Re-usable scratch for Vector2 setters that copy on assignment.
+const SCRATCH_DIMENSIONS = new BABYLON.Vector2()
+
+function resolveVector3Target(instance: AnyRecord, fieldKey: string): BABYLON.Vector3 | null {
   const direct = instance[fieldKey]
-  if (direct instanceof BABYLON.Vector3 || direct instanceof BABYLON.Vector2) return direct
+  if (direct instanceof BABYLON.Vector3) return direct
 
   const inner = (instance.mesh ?? instance.node) as AnyRecord | undefined
-  if (!inner) return undefined
-  const nested = inner[fieldKey]
-  if (nested instanceof BABYLON.Vector3 || nested instanceof BABYLON.Vector2) return nested
-  return undefined
+  const nested = inner?.[fieldKey]
+  if (nested instanceof BABYLON.Vector3) return nested
+  return null
 }
 
-function patchVector(instance: AnyRecord, key: string, nextValue: unknown): boolean {
-  // Babylon uses `scaling`, not `scale`. Map the declarative prop so we never
-  // dump a raw array into the scene graph.
+function applyVector3(instance: AnyRecord, key: string, arr: number[]): boolean {
   const fieldKey = key === 'scale' ? 'scaling' : key
+  const target = resolveVector3Target(instance, fieldKey)
+  if (!target) return false
+  target.set(Number(arr[0]), Number(arr[1]), Number(arr[2]))
+  return true
+}
 
-  if (!Array.isArray(nextValue)) return false
-
-  const target = resolveVectorTarget(instance, fieldKey)
-
-  if (target instanceof BABYLON.Vector3 && nextValue.length === 3) {
-    target.set(Number(nextValue[0]), Number(nextValue[1]), Number(nextValue[2]))
-    return true
+function applyVector2(instance: AnyRecord, key: string, arr: number[]): boolean {
+  // `dimensions` (HolographicSlate) is a setter that internally `copyFrom`s
+  // the value and runs `_positionElements`, so passing scratch by reference is
+  // safe. `minDimensions` is a plain field — assigning scratch by reference
+  // would leak our scratch into the slate, so we copyFrom the live vector.
+  if (key === 'minDimensions') {
+    const live = instance[key]
+    if (live instanceof BABYLON.Vector2) {
+      live.set(Number(arr[0]), Number(arr[1]))
+      return true
+    }
+    return false
   }
-  if (target instanceof BABYLON.Vector2 && nextValue.length === 2) {
-    target.set(Number(nextValue[0]), Number(nextValue[1]))
+
+  const scratch = SCRATCH_DIMENSIONS
+  scratch.set(Number(arr[0]), Number(arr[1]))
+  try {
+    instance[key] = scratch
     return true
+  } catch {
+    // Setter touches mesh internals that don't exist until the host attaches
+    // the control. The pending entry will be retried after addControl.
+    return false
   }
-  return false
 }
 
 function patchEvent(el: XRNode, instance: AnyRecord, key: string, nextValue: unknown): void {
   const eventName = key.slice(2).toLowerCase()
-  const observers = (el._observers ??= {})
+  const observers = (el._observers ??= new Map<string, XRObserverHandle>())
 
-  const existing = observers[eventName]
+  const existing = observers.get(eventName)
   if (existing) {
-    existing.remove()
-    delete observers[eventName]
+    existing.observable.remove(existing.observer)
+    observers.delete(eventName)
   }
 
   if (typeof nextValue !== 'function') return
@@ -68,11 +83,12 @@ function patchEvent(el: XRNode, instance: AnyRecord, key: string, nextValue: unk
   const observableKey = OBSERVABLE_MAP[eventName]
   if (!observableKey) return
 
-  const observable = instance[observableKey] as ObservableLike | undefined
+  const observable = instance[observableKey] as BABYLON.Observable<unknown> | undefined
   if (!observable || typeof observable.add !== 'function') return
 
-  const observer = observable.add(nextValue as EventCallback)
-  observers[eventName] = observer as unknown as BABYLON.Observer<unknown>
+  const observer = observable.add(nextValue as EventCallback) as BABYLON.Observer<unknown> | null
+  if (!observer) return
+  observers.set(eventName, { observable, observer })
 }
 
 export function patchXRProp(el: XRNode, key: string, _prevValue: unknown, nextValue: unknown): void {
@@ -117,14 +133,46 @@ export function patchXRProp(el: XRNode, key: string, _prevValue: unknown, nextVa
     return
   }
 
-  // 3. Vector3/Vector2 props — reuse the existing instance vectors.
-  if ((VECTOR3_KEYS.has(key) || VECTOR2_KEYS.has(key)) && Array.isArray(nextValue)) {
-    patchVector(instance, key, nextValue)
+  // 3. Vector3 props (position/rotation/scale→scaling).
+  //    Control3D.position pre-mount returns a fresh `Vector3.Zero()` — writing
+  //    to that throw-away vector is lost. Park the value; replay in flush
+  //    after the host attaches the control and the live vector exists.
+  if (VECTOR3_KEYS.has(key === 'scale' ? 'scaling' : key) && Array.isArray(nextValue) && nextValue.length === 3) {
+    const fieldKey = key === 'scale' ? 'scaling' : key
+    ;(el._pendingVectorProps ??= new Map<string, number[]>()).set(fieldKey, nextValue as number[])
+    applyVector3(instance, key, nextValue as number[])
     return
   }
 
-  // 4. Scalar / object props
-  const fieldKey = key === 'scale' ? 'scaling' : key
-  if (instance[fieldKey] === nextValue) return
-  instance[fieldKey] = nextValue
+  // 4. Vector2 props (dimensions / minDimensions). Apply via setter so
+  //    HolographicSlate re-clamps against minDimensions and re-positions its
+  //    sub-meshes. Pre-mount setter call may throw (mesh internals missing) —
+  //    flush retries post-mount.
+  if (VECTOR2_KEYS.has(key) && Array.isArray(nextValue) && nextValue.length === 2) {
+    ;(el._pendingVectorProps ??= new Map<string, number[]>()).set(key, nextValue as number[])
+    applyVector2(instance, key, nextValue as number[])
+    return
+  }
+
+  // 5. Scalar / object props.
+  if (instance[key] === nextValue) return
+  instance[key] = nextValue
+}
+
+// minDimensions MUST land before dimensions so the slate's clamp logic sees
+// the user-defined floor.
+const VECTOR_FLUSH_ORDER = ['minDimensions', 'dimensions', 'position', 'rotation', 'scaling']
+
+export function flushPendingVectorProps(el: XRNode): void {
+  const pending = el._pendingVectorProps
+  if (!pending || !el.instance) return
+  const instance = el.instance as unknown as AnyRecord
+
+  for (const key of VECTOR_FLUSH_ORDER) {
+    const value = pending.get(key)
+    if (!value) continue
+    if (VECTOR2_KEYS.has(key)) applyVector2(instance, key, value)
+    else applyVector3(instance, key, value)
+  }
+  pending.clear()
 }

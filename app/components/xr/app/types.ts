@@ -19,6 +19,11 @@ export type XRNodeType
 
 export type XRInstance = GUI.Control | GUI.Control3D | BABYLON.TransformNode | BABYLON.Mesh | null
 
+export interface XRObserverHandle {
+  observable: BABYLON.Observable<unknown>
+  observer: BABYLON.Observer<unknown>
+}
+
 export interface XRRootContainer {
   __isXRRoot: true
   gui3DManager: GUI.GUI3DManager
@@ -35,13 +40,22 @@ export interface XRNode {
   nodeType?: 'element' | 'text' | 'comment'
   text?: string
   isFragment?: boolean
-  _observers?: Record<string, BABYLON.Observer<unknown>>
+  _observers?: Map<string, XRObserverHandle>
   _billboardMode?: number
   _followBehavior?: BABYLON.FollowBehavior | null
   _pool?: XRNodePool<AnyPoolableControl> | null
   _wrapperMesh?: BABYLON.Mesh | null
   _wrapperADT?: GUI.AdvancedDynamicTexture | null
   _wrapperMeshButton?: GUI.MeshButton3D | null
+  _pendingSlateContent?: GUI.Control | null
+  // Vector props (position/rotation/scale/dimensions/minDimensions) parked
+  // until the underlying Babylon node exists. Re-applied after the control is
+  // attached to its host (GUI3DManager or AdvancedDynamicTexture).
+  _pendingVectorProps?: Map<string, number[]>
+  // Children whose 3D parent was not yet attached to GUI3DManager when they
+  // mounted (depth-first traversal). Container3D.addControl would crash on a
+  // null `_host` — drained after the parent itself attaches.
+  _pendingChildren?: XRNode[]
 }
 
 export function isXRRootContainer(node: unknown): node is XRRootContainer {

@@ -4,27 +4,36 @@
     :disabled="isLoading"
     @click="handleClick"
   >
-    {{ isLoading ? 'Loading Engine...' : (isReady ? 'Enter WebXR' : 'Load WebXR') }}
+    {{ label }}
   </button>
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue'
+import type { XRSessionMode } from '../utils/webxr-check'
+
 const props = defineProps<{
   isLoading?: boolean
   isReady?: boolean
+  mode?: XRSessionMode | null
 }>()
 
 const emit = defineEmits<{
-  (e: 'request-load'): void
-  (e: 'request-enter'): void
+  (e: 'request-load' | 'request-enter'): void
 }>()
 
-const handleClick = () => {
-  if (props.isReady) {
-    emit('request-enter')
-  } else {
-    emit('request-load')
-  }
+const modeLabel = computed<string>(() =>
+  props.mode === 'immersive-ar' ? 'AR' : 'VR',
+)
+
+const label = computed<string>(() => {
+  if (props.isLoading) return `Loading ${modeLabel.value}…`
+  if (props.isReady) return `Enter ${modeLabel.value}`
+  return `Open ${modeLabel.value}`
+})
+
+const handleClick = (): void => {
+  emit(props.isReady ? 'request-enter' : 'request-load')
 }
 </script>
 
@@ -42,7 +51,7 @@ const handleClick = () => {
   font-size: 16px;
   cursor: pointer;
   z-index: 1000;
-  pointer-events: auto; /* Разрешаем клик по кнопке */
+  pointer-events: auto;
 }
 
 .xr-enter-button:hover:not(:disabled) {

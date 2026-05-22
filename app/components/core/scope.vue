@@ -1,10 +1,10 @@
 <script lang="ts" setup>
-import { onMounted, provide, ref } from 'vue'
+import { onMounted, provide, ref, shallowRef } from 'vue'
 import { xrRoutes } from '../xr/views/routes'
-import { checkWebXRSupport } from '../xr/utils/webxr-check'
+import { resolvePreferredXRMode, type XRSessionMode } from '../xr/utils/webxr-check'
 
 interface Props {
-  /** The name of the user */
+  /** The name of the user-scope provider. */
   name?: string
 }
 
@@ -14,60 +14,54 @@ provide(props.name || 'default-scope', {
   scope: {},
 })
 
-const isXRSupported = ref(false)
-const isXRLoadRequested = ref(false)
-const isXRReady = ref(false)
-const isXRActive = ref(false)
-let enterXRCallback: (() => Promise<void>) | null = null
+const xrMode = shallowRef<XRSessionMode | null>(null)
+const isLoadRequested = ref(false)
+const isReady = ref(false)
+const isActive = ref(false)
+let enterXR: (() => Promise<void>) | null = null
 
 onMounted(async () => {
-  isXRSupported.value = await checkWebXRSupport()
+  xrMode.value = await resolvePreferredXRMode()
 })
 
-const requestLoad = () => {
-  console.log('[SCOPE] requestLoad clicked')
-  isXRLoadRequested.value = true
+const requestLoad = (): void => {
+  isLoadRequested.value = true
 }
 
-const onXRReady = async (enterXR: () => Promise<void>) => {
-  console.log('[SCOPE] onXRReady received')
-  isXRReady.value = true
-
-  // Автоматический вход в VR при первой загрузке (если браузер еще помнит клик пользователя)
+const onReady = async (enterXRFn: () => Promise<void>): Promise<void> => {
+  isReady.value = true
+  enterXR = enterXRFn
+  // Try a transparent auto-enter — the click that requested load still counts
+  // as a user gesture for `enterXRAsync` on the major runtimes. If the gesture
+  // expired, the button stays visible and the second click enters manually.
   try {
-    console.log('[SCOPE] Attempting auto-enter XR...')
+    await enterXRFn()
+  } catch {
+    // Silent: user will click "Enter" again.
+  }
+}
+
+const requestEnter = async (): Promise<void> => {
+  if (!enterXR) return
+  try {
     await enterXR()
-    console.log('[SCOPE] Auto-enter XR succeeded')
-  } catch (e) {
-    console.warn('[SCOPE] Auto-enter failed (user gesture likely expired). Waiting for manual click.', e)
-    // Сохраняем коллбек, чтобы пользователь мог войти по второму клику
-    enterXRCallback = enterXR
+  } catch (err) {
+    console.error('[xr-scope] enterXR failed:', err)
   }
 }
 
-const requestEnter = async () => {
-  console.log('[SCOPE] requestEnter clicked')
-  if (enterXRCallback) {
-    try {
-      console.log('[SCOPE] Calling enterXRCallback...')
-      await enterXRCallback()
-      console.log('[SCOPE] enterXRCallback succeeded')
-    } catch (e) {
-      console.error('[SCOPE] enterXRCallback failed:', e)
-    }
-  } else {
-    console.error('[SCOPE] enterXRCallback is null!')
-  }
+const onSessionStarted = (): void => {
+  isActive.value = true
 }
 
-const onSessionStarted = () => {
-  console.log('[SCOPE] onSessionStarted received')
-  isXRActive.value = true
+const onSessionEnded = (): void => {
+  isActive.value = false
 }
 
-const onSessionEnded = () => {
-  console.log('[SCOPE] onSessionEnded received')
-  isXRActive.value = false
+const onInitFailed = (err: unknown): void => {
+  console.error('[xr-scope] XR initialisation failed:', err)
+  // Hide the button so the user is not stuck clicking a dead control.
+  xrMode.value = null
 }
 </script>
 
@@ -80,23 +74,26 @@ const onSessionEnded = () => {
 
     <client-only>
       <div
-        v-if="isXRSupported"
+        v-if="xrMode"
         class="xr-overlay"
       >
         <LazyXrCoreProvider
-          v-if="isXRLoadRequested"
+          v-if="isLoadRequested"
           :routes="xrRoutes"
-          @ready="onXRReady"
+          :mode="xrMode"
+          @ready="onReady"
           @session-started="onSessionStarted"
           @session-ended="onSessionEnded"
+          @init-failed="onInitFailed"
         >
           <LazyXrAppRouterView />
         </LazyXrCoreProvider>
 
         <LazyXrBridgeEnterButton
-          v-if="!isXRActive"
-          :is-loading="isXRLoadRequested && !isXRReady"
-          :is-ready="isXRReady"
+          v-if="!isActive"
+          :is-loading="isLoadRequested && !isReady"
+          :is-ready="isReady"
+          :mode="xrMode"
           @request-load="requestLoad"
           @request-enter="requestEnter"
         />
@@ -112,7 +109,7 @@ const onSessionEnded = () => {
   left: 0;
   width: 100%;
   height: 100%;
-  pointer-events: none; /* Let clicks pass through to the main app if XR is in background */
+  pointer-events: none;
   z-index: 9999;
 }
 </style>

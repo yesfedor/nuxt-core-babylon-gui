@@ -4,7 +4,22 @@ import * as GUI from '@babylonjs/gui'
 import { isXRRootContainer, type XRComponentType, type XRNode, type XRNodeType, type XRParent, type XRRootContainer } from './types'
 import { destroyNode } from '../composables/useXRObservable'
 import { xrComponentRegistry } from './registry'
-import { patchXRProp } from './props'
+import { flushPendingVectorProps, patchXRProp } from './props'
+
+// --- TEMPORARY DIAGNOSTIC LOGS ---
+// Remove after the rendering pipeline is confirmed working.
+const DEBUG_XR = true
+const xlog = (...args: unknown[]): void => {
+  if (DEBUG_XR) console.log('[xr]', ...args)
+}
+const describe = (n: XRParent): string => {
+  if (!n) return 'null'
+  if (isXRRootContainer(n)) return 'ROOT'
+  const node = n as XRNode
+  const inst = node.instance as { _host?: unknown, name?: string } | null
+  return `${node.type}${inst?.name ? `(${inst.name})` : ''}${inst?._host ? '+host' : ''}`
+}
+// ---
 
 type AnyRecord = Record<string, unknown>
 
@@ -13,8 +28,107 @@ interface ControlContainer {
   removeControl?: (control: unknown) => unknown
 }
 
-interface SlateLike {
-  content?: GUI.Control
+interface ButtonContainer {
+  addButton: (control: unknown) => unknown
+  removeButton?: (control: unknown) => unknown
+}
+
+// `TouchHolographicMenu` (and its subclass `NearMenu`) refuses generic
+// `addControl` and exposes `addButton` instead. We detect it structurally so
+// the renderer doesn't have to special-case each subclass.
+function asButtonContainer(instance: unknown): ButtonContainer | null {
+  if (!instance) return null
+  const candidate = instance as Partial<ButtonContainer>
+  return typeof candidate.addButton === 'function' ? (candidate as ButtonContainer) : null
+}
+
+// Node types whose `addControl` is intercepted by TouchHolographicMenu's
+// guard. Routing them through `addButton` keeps logs clean and actually
+// registers the child in the menu's grid layout.
+const BUTTON_MENU_PARENT_TYPES = new Set<XRNodeType>(['3d-near-menu'])
+
+function isButtonMenuParent(type: XRNodeType | undefined): boolean {
+  return !!type && BUTTON_MENU_PARENT_TYPES.has(type)
+}
+
+interface HostBearer {
+  _host?: unknown
+}
+
+function hasHost(instance: unknown): boolean {
+  return !!(instance && (instance as HostBearer)._host)
+}
+
+function attachChildToParent(parentNode: XRNode, child: XRNode): void {
+  if (!child.instance || !parentNode.instance) return
+
+  if (isButtonMenuParent(parentNode.type)) {
+    const buttonContainer = asButtonContainer(parentNode.instance)
+    if (buttonContainer) {
+      buttonContainer.addButton(child.instance)
+    }
+  } else {
+    const container = asContainer(parentNode.instance)
+    if (container) {
+      container.addControl(child.instance)
+    }
+  }
+
+  flushPendingVectorProps(child)
+  flushContentDisplay(child)
+  applyDeferredProps(child)
+  // Recurse: now that this child has its own `_host`, drain its own buffer.
+  drainPendingChildren(child)
+}
+
+function drainPendingChildren(parent: XRNode): void {
+  const queue = parent._pendingChildren
+  if (!queue || queue.length === 0) return
+  // Take ownership and clear early so nested attaches don't see stale state.
+  parent._pendingChildren = undefined
+  for (const child of queue) {
+    attachChildToParent(parent, child)
+  }
+}
+
+// HolographicSlate / Button3D / HolographicButton / TouchHolographicButton /
+// MeshButton3D all extend `ContentDisplay3D`. Its `content` setter bails
+// silently while `_host` is null, which is the case for every node mounted
+// before the parent is attached to GUI3DManager. We park the child here and
+// re-apply it once `_host` is wired (see flushContentDisplay below).
+const CONTENT_DISPLAY_TYPES = new Set<XRNodeType>([
+  '3d-button',
+  '3d-mesh-button',
+  '3d-holographic-button',
+  '3d-touch-holographic-button',
+  '3d-holographic-slate',
+])
+
+function isContentDisplayParent(type: XRNodeType | undefined): boolean {
+  return !!type && CONTENT_DISPLAY_TYPES.has(type)
+}
+
+function assignContentDisplayChild(parentNode: XRNode, child: GUI.Control): void {
+  parentNode._pendingSlateContent = child
+  const parent = parentNode.instance as unknown as ContentDisplayLike | null
+  if (parent?._host?.utilityLayer) {
+    parent.content = child
+    parentNode._pendingSlateContent = null
+  }
+}
+
+function flushContentDisplay(node: XRNode): void {
+  const pending = node._pendingSlateContent
+  if (!pending) return
+  const inst = node.instance as unknown as ContentDisplayLike | null
+  if (!inst) return
+  inst.content = pending
+  node._pendingSlateContent = null
+}
+
+interface ContentDisplayLike {
+  content: GUI.Control | null
+  _host?: { utilityLayer?: unknown } | null
 }
 
 let wrapperSeq = 0
@@ -124,6 +238,7 @@ export const { render, createApp } = createRenderer<XRComponentType, XRComponent
   createElement(type, _isSVG, _isCustom, _props): XRComponentType {
     const componentDef = xrComponentRegistry[type]
     if (!componentDef) {
+      xlog('createElement UNKNOWN', type)
       return { type: 'unknown', instance: null }
     }
     const node: XRNode = {
@@ -131,6 +246,7 @@ export const { render, createApp } = createRenderer<XRComponentType, XRComponent
       instance: componentDef.factory(),
       _pool: componentDef.pool ?? null,
     }
+    xlog('createElement', componentDef.type)
     return node
   },
 
@@ -145,8 +261,13 @@ export const { render, createApp } = createRenderer<XRComponentType, XRComponent
     if (isXRRootContainer(parent)) {
       if (isType3D(el.type)) {
         parent.gui3DManager.addControl(el.instance as GUI.Control3D)
+        flushPendingVectorProps(el)
+        flushContentDisplay(el)
+        drainPendingChildren(el)
       } else if (isType2D(el.type)) {
         parent.advancedTexture.addControl(el.instance as GUI.Control)
+        flushPendingVectorProps(el)
+        drainPendingChildren(el)
       }
       applyDeferredProps(el)
       return
@@ -156,14 +277,17 @@ export const { render, createApp } = createRenderer<XRComponentType, XRComponent
     const parentInst = parentNode.instance
     if (!parentInst) return
 
-    // 2. HolographicSlate slot — content viewport (2D under a 3D shell).
-    if (parentNode.type === '3d-holographic-slate') {
-      ;(parentInst as unknown as SlateLike).content = el.instance as GUI.Control
+    // 2. ContentDisplay3D parents (slate, button3D, holographic-button, ...)
+    //    keep a single GUI.Control as their facade. A 2D child becomes the
+    //    facade content; deferred until _host is wired by the manager.
+    if (isContentDisplayParent(parentNode.type) && isType2D(el.type)) {
+      assignContentDisplayChild(parentNode, el.instance as GUI.Control)
       applyDeferredProps(el)
       return
     }
 
-    // 3. 2D-in-3D bridge: wrap plane → ADT → MeshButton3D.
+    // 3. 2D-in-3D bridge for container-style 3D parents (panels): wrap into
+    //    plane → ADT → MeshButton3D so addControl receives a Control3D.
     if (isType3D(parentNode.type) && isType2D(el.type)) {
       if (bridge2DInto3D(el, parentNode)) {
         applyDeferredProps(el)
@@ -171,12 +295,17 @@ export const { render, createApp } = createRenderer<XRComponentType, XRComponent
       }
     }
 
-    // 4. Standard addControl path.
-    const container = asContainer(parentInst)
-    if (container) {
-      container.addControl(el.instance)
+    // 4. 3D parent without `_host` cannot accept children yet — Babylon's
+    //    Container3D.addControl dereferences `this._host.utilityLayer` and
+    //    crashes. Buffer; the parent will drain when it attaches.
+    if (isType3D(parentNode.type) && !hasHost(parentInst)) {
+      ;(parentNode._pendingChildren ??= []).push(el)
       applyDeferredProps(el)
+      return
     }
+
+    // 5. Attach via the right channel (button-menu vs Container3D vs 2D).
+    attachChildToParent(parentNode, el)
   },
 
   remove(el) {
@@ -191,6 +320,8 @@ export const { render, createApp } = createRenderer<XRComponentType, XRComponent
         if (isType3D(el.type)) parent.gui3DManager.removeControl(el.instance as GUI.Control3D)
         else if (isType2D(el.type)) parent.advancedTexture.removeControl(el.instance as GUI.Control)
       } else if (parent) {
+        // TouchHolographicMenu doesn't expose removeButton; the inherited
+        // Container3D.removeControl handles detachment correctly.
         const container = asContainer((parent as XRNode).instance)
         container?.removeControl?.(el.instance)
       }
@@ -198,7 +329,8 @@ export const { render, createApp } = createRenderer<XRComponentType, XRComponent
 
     // 2. Clear Vue→Babylon observer bridges.
     if (el._observers) {
-      for (const obs of Object.values(el._observers)) obs.remove()
+      el._observers.forEach(({ observable, observer }) => observable.remove(observer))
+      el._observers.clear()
       el._observers = undefined
     }
 
@@ -274,6 +406,7 @@ export const { render, createApp } = createRenderer<XRComponentType, XRComponent
   },
 
   insertStaticContent(_content, _parent, _anchor, _isSVG, _start, _end) {
-    return [null, null]
+    const placeholder: XRComponentType = { type: 'unknown', instance: null }
+    return [placeholder, placeholder]
   },
 })
