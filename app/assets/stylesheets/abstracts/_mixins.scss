@@ -1,0 +1,47 @@
+/* mixins */
+@use 'sass:map';
+@use 'variables' as *;
+
+@mixin media-max($mediaWidth) {
+  @media only screen and (max-width: $mediaWidth) {
+    @content;
+  }
+}
+
+@mixin media-min($mediaWidth) {
+  @media only screen and (min-width: $mediaWidth) {
+    @content;
+  }
+}
+
+@mixin media-distance($mediaWidthMin, $mediaWidthMax) {
+  @media only screen and (min-width: $mediaWidthMin) and (max-width: $mediaWidthMax - 1) {
+    @content;
+  }
+}
+
+@mixin bp-tablet {
+  @media only screen and (min-width: map.get($breakpoints, 'tablet')) {
+    @content;
+  }
+}
+
+@mixin bp-desktop {
+  @media only screen and (min-width: map.get($breakpoints, 'desktop')) {
+    @content;
+  }
+}
+
+@mixin use-scrollbar($width) {
+  &::-webkit-scrollbar {
+    width: $width;
+  }
+
+  &::-webkit-scrollbar-thumb {
+    border-radius: 4px;
+  }
+
+  &::-webkit-scrollbar-track {
+    border-radius: 4px;
+  }
+}

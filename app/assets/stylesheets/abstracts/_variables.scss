@@ -1,0 +1,20 @@
+/* variables */
+$scrollbar-width: 4px;
+$breakpoints: (
+  desktop: 1920px,
+  desktop-xs: 1200px,
+  tablet: 1199px,
+  tablet-xs: 768px,
+  mobile: 767px,
+  mobile-xs: 0,
+);
+$z-indexes: (
+  dialog: 100,
+  backdrop: 99,
+  header: 50,
+  aside: 40,
+  navigation-bottom: 30,
+  dropdown: 20,
+  overlay: 10,
+  below: -1,
+);
