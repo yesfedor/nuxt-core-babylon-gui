@@ -28,9 +28,17 @@ const requestLoad = () => {
   isXRLoadRequested.value = true
 }
 
-const onXRReady = (enterXR: () => Promise<void>) => {
-  enterXRCallback = enterXR
+const onXRReady = async (enterXR: () => Promise<void>) => {
   isXRReady.value = true
+  
+  // Автоматический вход в VR при первой загрузке (если браузер еще помнит клик пользователя)
+  try {
+    await enterXR()
+  } catch (e) {
+    console.warn('Auto-enter failed (user gesture likely expired). Waiting for manual click.', e)
+    // Сохраняем коллбек, чтобы пользователь мог войти по второму клику
+    enterXRCallback = enterXR
+  }
 }
 
 const requestEnter = async () => {

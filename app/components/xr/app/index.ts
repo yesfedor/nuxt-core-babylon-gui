@@ -16,6 +16,10 @@ export const { render, createApp } = createRenderer<XRComponentType, XRComponent
     return { type: 'unknown', instance: null }
   },
   insert(el, parent, anchor) {
+    if (el) {
+      ;(el as any).parent = parent
+    }
+
     if (!el || !el.instance || (el as any).isFragment || (el as any).nodeType === 'comment') {
       return // Robust filtration of Vue-internal comment/meta VNodes
     }
@@ -55,6 +59,12 @@ export const { render, createApp } = createRenderer<XRComponentType, XRComponent
       // 1. Убираем из родителя
       if (el.instance.parent && typeof el.instance.parent.removeControl === 'function') {
         el.instance.parent.removeControl(el.instance)
+      } else if (el.parent && (el.parent as any).__isXRRoot) {
+        if (el.type && el.type.startsWith('3d-') && (el.parent as any).gui3DManager) {
+          ;(el.parent as any).gui3DManager.removeControl(el.instance)
+        } else if (el.type && el.type.startsWith('2d-') && (el.parent as any).advancedTexture) {
+          ;(el.parent as any).advancedTexture.removeControl(el.instance)
+        }
       }
 
       // 2. Очищаем все Vue-обсерверы (Garbage Collection)
@@ -71,10 +81,10 @@ export const { render, createApp } = createRenderer<XRComponentType, XRComponent
     patchXRProp(el, key, prevValue, nextValue)
   },
   createText(text) {
-    return { type: 'unknown', instance: null }
+    return { type: 'unknown', instance: null, nodeType: 'text', text } as any
   },
   createComment(text) {
-    return { type: 'unknown', instance: null, nodeType: 'comment' } as any
+    return { type: 'unknown', instance: null, nodeType: 'comment', text } as any
   },
   setText(node, text) {
     // No-op
@@ -85,10 +95,7 @@ export const { render, createApp } = createRenderer<XRComponentType, XRComponent
     }
   },
   parentNode(node) {
-    if (node && node.instance && node.instance.parent) {
-      return { type: 'unknown', instance: node.instance.parent }
-    }
-    return null
+    return (node as any)?.parent || null
   },
   nextSibling(node) {
     return null
