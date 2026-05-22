@@ -111,15 +111,18 @@ onMounted(async () => {
       if (state === BABYLON.WebXRState.IN_XR) {
         isXRActive.value = true
         engine.value?.runRenderLoop(renderLoop)
+        emit('session-started')
       } else if (state === BABYLON.WebXRState.NOT_IN_XR) {
         isXRActive.value = false
         engine.value?.stopRenderLoop(renderLoop)
+        emit('session-ended')
       }
     })
 
     // Рендерим один кадр для компиляции шейдеров
     scene.value.executeWhenReady(() => {
       scene.value?.render()
+      emit('ready', enterXR)
     })
   } catch (e) {
     console.error('WebXR not supported or failed to initialize', e)
@@ -132,9 +135,11 @@ const enterXR = async () => {
   }
 }
 
-defineExpose({
-  enterXR
-})
+const emit = defineEmits<{
+  (e: 'ready', enterXR: () => Promise<void>): void
+  (e: 'session-started'): void
+  (e: 'session-ended'): void
+}>()
 
 onBeforeUnmount(() => {
   if (xrApp) xrApp.unmount()

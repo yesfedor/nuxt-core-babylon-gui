@@ -1,19 +1,26 @@
 <template>
-  <button
-    class="xr-enter-button"
-    @click="requestSession"
-  >
-    Enter WebXR
+  <button class="xr-enter-button" @click="handleClick" :disabled="isLoading">
+    {{ isLoading ? 'Loading Engine...' : (isReady ? 'Enter WebXR' : 'Load WebXR') }}
   </button>
 </template>
 
 <script setup lang="ts">
-const emit = defineEmits<{
-  (e: 'request-session'): void
+const props = defineProps<{
+  isLoading?: boolean
+  isReady?: boolean
 }>()
 
-const requestSession = () => {
-  emit('request-session')
+const emit = defineEmits<{
+  (e: 'request-load'): void
+  (e: 'request-enter'): void
+}>()
+
+const handleClick = () => {
+  if (props.isReady) {
+    emit('request-enter')
+  } else {
+    emit('request-load')
+  }
 }
 </script>
 
@@ -34,7 +41,12 @@ const requestSession = () => {
   pointer-events: auto; /* Разрешаем клик по кнопке */
 }
 
-.xr-enter-button:hover {
+.xr-enter-button:hover:not(:disabled) {
   background-color: #0056b3;
+}
+
+.xr-enter-button:disabled {
+  background-color: #555;
+  cursor: not-allowed;
 }
 </style>

@@ -1,8 +1,5 @@
 <script lang="ts" setup>
 import {onMounted, provide, ref} from 'vue'
-import XrCoreProvider from '../xr/core/provider.vue'
-import XrAppRouterView from '../xr/app/router-view.vue'
-import XrBridgeEnterButton from '../xr/bridge/enter-button.vue'
 import {xrRoutes} from '../xr/views/routes'
 import {checkWebXRSupport} from '../xr/utils/webxr-check'
 
@@ -18,16 +15,36 @@ provide(props.name || 'default-scope', {
 })
 
 const isXRSupported = ref(false)
-const xrProviderRef = ref<InstanceType<typeof XrCoreProvider> | null>(null)
+const isXRLoadRequested = ref(false)
+const isXRReady = ref(false)
+const isXRActive = ref(false)
+let enterXRCallback: (() => Promise<void>) | null = null
 
 onMounted(async () => {
   isXRSupported.value = await checkWebXRSupport()
 })
 
-const requestXRSession = async () => {
-  if (xrProviderRef.value) {
-    await xrProviderRef.value.enterXR()
+const requestLoad = () => {
+  isXRLoadRequested.value = true
+}
+
+const onXRReady = (enterXR: () => Promise<void>) => {
+  enterXRCallback = enterXR
+  isXRReady.value = true
+}
+
+const requestEnter = async () => {
+  if (enterXRCallback) {
+    await enterXRCallback()
   }
+}
+
+const onSessionStarted = () => {
+  isXRActive.value = true
+}
+
+const onSessionEnded = () => {
+  isXRActive.value = false
 }
 </script>
 
@@ -40,12 +57,22 @@ const requestXRSession = async () => {
 
     <client-only>
       <div class="xr-overlay" v-if="isXRSupported">
-        <xr-core-provider ref="xrProviderRef" :routes="xrRoutes">
-          <xr-app-router-view />
-        </xr-core-provider>
+        <LazyXrCoreProvider 
+          v-if="isXRLoadRequested" 
+          :routes="xrRoutes"
+          @ready="onXRReady"
+          @session-started="onSessionStarted"
+          @session-ended="onSessionEnded"
+        >
+          <LazyXrAppRouterView />
+        </LazyXrCoreProvider>
 
-        <xr-bridge-enter-button
-          @request-session="requestXRSession"
+        <LazyXrBridgeEnterButton
+          v-if="!isXRActive"
+          :is-loading="isXRLoadRequested && !isXRReady"
+          :is-ready="isXRReady"
+          @request-load="requestLoad"
+          @request-enter="requestEnter"
         />
       </div>
     </client-only>

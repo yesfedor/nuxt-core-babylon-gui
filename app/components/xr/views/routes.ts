@@ -1,8 +1,7 @@
 import type { XRRoute } from '../app/route'
-import IndexView from './index.vue'
-import SettingsView from './settings.vue'
+import { defineAsyncComponent } from 'vue'
 
 export const xrRoutes: XRRoute[] = [
-  { path: '/', name: 'index', component: IndexView },
-  { path: '/settings', name: 'settings', component: SettingsView },
+  { path: '/', name: 'index', component: defineAsyncComponent(() => import('./index.vue')) },
+  { path: '/settings', name: 'settings', component: defineAsyncComponent(() => import('./settings.vue')) }
 ]
