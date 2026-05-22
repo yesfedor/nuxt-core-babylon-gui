@@ -10,9 +10,9 @@ export default defineNuxtConfig({
 
   modules: [
     // https://eslint.nuxt.com/packages/module
-    '@nuxt/eslint',
+    // '@nuxt/eslint',
     // https://nuxt.com/modules/stylelint
-    '@nuxtjs/stylelint-module',
+    // '@nuxtjs/stylelint-module',
     // https://nuxt.com/modules/pinia
     '@pinia/nuxt',
     // https://nuxt.com/modules/vite-pwa-nuxt
@@ -78,6 +78,12 @@ export default defineNuxtConfig({
   devServer: {
     host: String(process.env.HOST) || '0.0.0.0',
     port: Number(process.env.NITRO_PORT) || 3000,
+  },
+
+  vue: {
+    compilerOptions: {
+      isCustomElement: (tag) => tag.startsWith('xr-2d-') || tag.startsWith('xr-3d-')
+    }
   },
 
   features: {

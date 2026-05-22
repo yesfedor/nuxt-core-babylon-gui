@@ -13,9 +13,8 @@ export default defineNuxtModule({
       const files = fs.readdirSync(dir, { withFileTypes: true })
       for (const file of files) {
         if (file.isDirectory()) {
-          yield * readAllFiles(path.join(dir, file.name))
-        }
-        else {
+          yield* readAllFiles(path.join(dir, file.name))
+        } else {
           yield path.join(dir, file.name)
         }
       }
@@ -38,8 +37,7 @@ export default defineNuxtModule({
         const match = path.match(sourceToIcon)
         if (match?.index) {
           return path.slice(match.index + sourceToIcon.length + 1)
-        }
-        else {
+        } else {
           throw new Error(`Icon error, icon not found: ${filePath}`)
         }
       })

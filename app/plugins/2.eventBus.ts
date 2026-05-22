@@ -26,8 +26,7 @@ export default defineNuxtPlugin({
         }
         if (e) {
           logger.info('bus', `${type}`, e)
-        }
-        else {
+        } else {
           logger.info('bus', `${type}`)
         }
       })
