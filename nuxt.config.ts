@@ -60,6 +60,12 @@ export default defineNuxtConfig({
     '~/assets/stylesheets/main.scss',
   ],
 
+  vue: {
+    compilerOptions: {
+      isCustomElement: tag => tag.startsWith('xr-2d-') || tag.startsWith('xr-3d-'),
+    },
+  },
+
   runtimeConfig: {
     public: {
       APP_DEBUG: Boolean(process.env.APP_DEBUG),
@@ -78,12 +84,6 @@ export default defineNuxtConfig({
   devServer: {
     host: String(process.env.HOST) || '0.0.0.0',
     port: Number(process.env.NITRO_PORT) || 3000,
-  },
-
-  vue: {
-    compilerOptions: {
-      isCustomElement: (tag) => tag.startsWith('xr-2d-') || tag.startsWith('xr-3d-')
-    }
   },
 
   features: {

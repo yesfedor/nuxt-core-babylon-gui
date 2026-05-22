@@ -1,7 +1,7 @@
 <script lang="ts" setup>
-import {onMounted, provide, ref} from 'vue'
-import {xrRoutes} from '../xr/views/routes'
-import {checkWebXRSupport} from '../xr/utils/webxr-check'
+import { onMounted, provide, ref } from 'vue'
+import { xrRoutes } from '../xr/views/routes'
+import { checkWebXRSupport } from '../xr/utils/webxr-check'
 
 interface Props {
   /** The name of the user */
@@ -32,7 +32,7 @@ const requestLoad = () => {
 const onXRReady = async (enterXR: () => Promise<void>) => {
   console.log('[SCOPE] onXRReady received')
   isXRReady.value = true
-  
+
   // Автоматический вход в VR при первой загрузке (если браузер еще помнит клик пользователя)
   try {
     console.log('[SCOPE] Attempting auto-enter XR...')
@@ -79,9 +79,12 @@ const onSessionEnded = () => {
     />
 
     <client-only>
-      <div class="xr-overlay" v-if="isXRSupported">
-        <LazyXrCoreProvider 
-          v-if="isXRLoadRequested" 
+      <div
+        v-if="isXRSupported"
+        class="xr-overlay"
+      >
+        <LazyXrCoreProvider
+          v-if="isXRLoadRequested"
           :routes="xrRoutes"
           @ready="onXRReady"
           @session-started="onSessionStarted"
@@ -113,4 +116,3 @@ const onSessionEnded = () => {
   z-index: 9999;
 }
 </style>
-

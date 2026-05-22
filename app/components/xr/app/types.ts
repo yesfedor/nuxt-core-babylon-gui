@@ -1,5 +1,6 @@
 import type * as BABYLON from '@babylonjs/core'
 import type * as GUI from '@babylonjs/gui'
+import type { AnyPoolableControl, XRNodePool } from '../utils/xr-pool'
 
 export type XRNodeType
   // 2D Atoms
@@ -16,9 +17,35 @@ export type XRNodeType
     | '3d-stack-panel' | '3d-plane-panel' | '3d-cylinder-panel' | '3d-sphere-panel' | '3d-scatter-panel'
     | 'unknown'
 
+export type XRInstance = GUI.Control | GUI.Control3D | BABYLON.TransformNode | BABYLON.Mesh | null
+
+export interface XRRootContainer {
+  __isXRRoot: true
+  gui3DManager: GUI.GUI3DManager
+  advancedTexture: GUI.AdvancedDynamicTexture
+  scene: BABYLON.Scene
+}
+
+export type XRParent = XRNode | XRRootContainer | null | undefined
+
 export interface XRNode {
   type: XRNodeType
-  instance: any
+  instance: XRInstance
+  parent?: XRParent
+  nodeType?: 'element' | 'text' | 'comment'
+  text?: string
+  isFragment?: boolean
+  _observers?: Record<string, BABYLON.Observer<unknown>>
+  _billboardMode?: number
+  _followBehavior?: BABYLON.FollowBehavior | null
+  _pool?: XRNodePool<AnyPoolableControl> | null
+  _wrapperMesh?: BABYLON.Mesh | null
+  _wrapperADT?: GUI.AdvancedDynamicTexture | null
+  _wrapperMeshButton?: GUI.MeshButton3D | null
+}
+
+export function isXRRootContainer(node: unknown): node is XRRootContainer {
+  return !!node && typeof node === 'object' && (node as { __isXRRoot?: boolean }).__isXRRoot === true
 }
 
 export type XRComponentType = XRNode
@@ -26,41 +53,41 @@ export type XRComponentType = XRNode
 declare module '@vue/runtime-core' {
   export interface GlobalComponents {
     // 2D Atoms
-    'xr-2d-text-block': any
-    'xr-2d-image': any
-    'xr-2d-line': any
-    'xr-2d-multi-line': any
-    'xr-2d-display-grid': any
+    'xr-2d-text-block': GUI.TextBlock
+    'xr-2d-image': GUI.Image
+    'xr-2d-line': GUI.Line
+    'xr-2d-multi-line': GUI.MultiLine
+    'xr-2d-display-grid': GUI.DisplayGrid
     // 2D Inputs
-    'xr-2d-button': any
-    'xr-2d-checkbox': any
-    'xr-2d-radio-button': any
-    'xr-2d-slider': any
-    'xr-2d-image-based-slider': any
-    'xr-2d-input-text': any
-    'xr-2d-input-text-area': any
-    'xr-2d-input-password': any
-    'xr-2d-color-picker': any
-    'xr-2d-virtual-keyboard': any
+    'xr-2d-button': GUI.Button
+    'xr-2d-checkbox': GUI.Checkbox
+    'xr-2d-radio-button': GUI.RadioButton
+    'xr-2d-slider': GUI.Slider
+    'xr-2d-image-based-slider': GUI.ImageBasedSlider
+    'xr-2d-input-text': GUI.InputText
+    'xr-2d-input-text-area': GUI.InputTextArea
+    'xr-2d-input-password': GUI.InputPassword
+    'xr-2d-color-picker': GUI.ColorPicker
+    'xr-2d-virtual-keyboard': GUI.VirtualKeyboard
     // 2D Layouts
-    'xr-2d-rectangle': any
-    'xr-2d-ellipse': any
-    'xr-2d-stack-panel': any
-    'xr-2d-grid': any
-    'xr-2d-scroll-viewer': any
+    'xr-2d-rectangle': GUI.Rectangle
+    'xr-2d-ellipse': GUI.Ellipse
+    'xr-2d-stack-panel': GUI.StackPanel
+    'xr-2d-grid': GUI.Grid
+    'xr-2d-scroll-viewer': GUI.ScrollViewer
     // 3D Controls
-    'xr-3d-button': any
-    'xr-3d-mesh-button': any
-    'xr-3d-holographic-button': any
-    'xr-3d-touch-holographic-button': any
-    'xr-3d-slider': any
-    'xr-3d-holographic-slate': any
-    'xr-3d-near-menu': any
+    'xr-3d-button': GUI.Button3D
+    'xr-3d-mesh-button': GUI.MeshButton3D
+    'xr-3d-holographic-button': GUI.HolographicButton
+    'xr-3d-touch-holographic-button': GUI.TouchHolographicButton
+    'xr-3d-slider': GUI.Slider3D
+    'xr-3d-holographic-slate': GUI.HolographicSlate
+    'xr-3d-near-menu': GUI.NearMenu
     // 3D Layouts
-    'xr-3d-stack-panel': any
-    'xr-3d-plane-panel': any
-    'xr-3d-cylinder-panel': any
-    'xr-3d-sphere-panel': any
-    'xr-3d-scatter-panel': any
+    'xr-3d-stack-panel': GUI.StackPanel3D
+    'xr-3d-plane-panel': GUI.PlanePanel
+    'xr-3d-cylinder-panel': GUI.CylinderPanel
+    'xr-3d-sphere-panel': GUI.SpherePanel
+    'xr-3d-scatter-panel': GUI.ScatterPanel
   }
 }

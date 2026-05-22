@@ -45,16 +45,16 @@ const slots = useSlots()
 const parent = getCurrentInstance()
 let xrApp: any = null
 
-  const renderLoop = () => {
-    scene.value?.render()
-  }
+const renderLoop = () => {
+  scene.value?.render()
+}
 
-  onMounted(async () => {
+onMounted(async () => {
   if (!renderCanvas.value) return
 
   engine.value = new BABYLON.Engine(renderCanvas.value, true)
   scene.value = new BABYLON.Scene(engine.value)
-  
+
   // Делаем фон прозрачным, чтобы не перекрывать 2D сайт
   scene.value.clearColor = new BABYLON.Color4(0, 0, 0, 0)
 
@@ -74,7 +74,7 @@ let xrApp: any = null
           sessionMode: 'immersive-ar', // Пробуем AR (Passthrough) сначала
           referenceSpaceType: 'local-floor',
         },
-        disableDefaultUI: true
+        disableDefaultUI: true,
       })
     } catch (e) {
       console.log('[PROVIDER] AR not supported, falling back to VR')
@@ -84,9 +84,9 @@ let xrApp: any = null
           sessionMode: 'immersive-vr',
           referenceSpaceType: 'local-floor',
         },
-        disableDefaultUI: true
+        disableDefaultUI: true,
       })
-      
+
       // В VR режиме делаем фон темным, чтобы не было видно "пустоты"
       scene.value.clearColor = new BABYLON.Color4(0.1, 0.1, 0.15, 1)
     }
@@ -104,6 +104,7 @@ let xrApp: any = null
     ;(rootContainer as any).__isXRRoot = true
     ;(rootContainer as any).gui3DManager = gui3DManager.value
     ;(rootContainer as any).advancedTexture = GUI.AdvancedDynamicTexture.CreateFullscreenUI('XR-Root-UI')
+    ;(rootContainer as any).scene = scene.value
 
     xrApp = createXRApp({
       name: 'XRRoot',
@@ -144,10 +145,10 @@ let xrApp: any = null
     scene.value.executeWhenReady(() => {
       console.log('[PROVIDER] Scene executeWhenReady fired')
       scene.value?.render()
-      
+
       // Запускаем постоянный рендер-луп, чтобы сцена обновлялась и реагировала на контроллеры
       engine.value?.runRenderLoop(renderLoop)
-      
+
       console.log('[PROVIDER] Emitting @ready with enterXR function')
       emit('ready', enterXR)
     })

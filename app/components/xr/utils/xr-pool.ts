@@ -1,53 +1,77 @@
-export class XRNodePool<T extends { isVisible: boolean }> {
-  private activeNodes = new Set<T>()
-  private inactivePool: T[] = []
+import type * as GUI from '@babylonjs/gui'
 
-  constructor(private factory: () => T) {}
+export interface PoolableNode {
+  isVisible: boolean
+}
+
+export class XRNodePool<T extends PoolableNode> {
+  private readonly activeNodes = new Set<T>()
+  private readonly inactivePool: T[] = []
+
+  constructor(
+    private readonly factory: () => T,
+    private readonly reset?: (node: T) => void,
+  ) {}
 
   acquire(): T {
-    let node: T
-    if (this.inactivePool.length > 0) {
-      node = this.inactivePool.pop()!
-    } else {
-      node = this.factory()
-    }
+    const node = this.inactivePool.length > 0 ? this.inactivePool.pop()! : this.factory()
     node.isVisible = true
     this.activeNodes.add(node)
     return node
   }
 
-  release(node: T) {
-    if (this.activeNodes.has(node)) {
-      this.activeNodes.delete(node)
-      node.isVisible = false
-      this.inactivePool.push(node)
-    }
+  release(node: T): boolean {
+    if (!this.activeNodes.has(node)) return false
+    this.activeNodes.delete(node)
+    node.isVisible = false
+    this.reset?.(node)
+    this.inactivePool.push(node)
+    return true
+  }
+
+  has(node: T): boolean {
+    return this.activeNodes.has(node)
   }
 
   getActiveNodes(): T[] {
     return Array.from(this.activeNodes)
   }
-}
 
-// Fast-Path Reactivity Buffer
-export class FastPathBuffer {
-  private buffer = new Map<any, Record<string, any>>()
-
-  set(node: any, key: string, value: any) {
-    if (!this.buffer.has(node)) {
-      this.buffer.set(node, {})
-    }
-    this.buffer.get(node)![key] = value
+  size(): { active: number, inactive: number } {
+    return { active: this.activeNodes.size, inactive: this.inactivePool.length }
   }
 
-  sync() {
-    for (const [node, props] of this.buffer.entries()) {
-      for (const key in props) {
-        node[key] = props[key]
-      }
+  dispose(): void {
+    const disposeOne = (node: T): void => {
+      const disposable = node as unknown as { dispose?: () => void }
+      if (typeof disposable.dispose === 'function') disposable.dispose()
     }
-    this.buffer.clear()
+    this.activeNodes.forEach(disposeOne)
+    this.inactivePool.forEach(disposeOne)
+    this.activeNodes.clear()
+    this.inactivePool.length = 0
   }
 }
 
-export const globalFastPathBuffer = new FastPathBuffer()
+export type AnyPoolableControl = GUI.Control3D & PoolableNode
+
+export const xrPoolRegistry = new Map<string, XRNodePool<AnyPoolableControl>>()
+
+export function registerXRPool<T extends AnyPoolableControl>(
+  tag: string,
+  factory: () => T,
+  reset?: (node: T) => void,
+): XRNodePool<T> {
+  const pool = new XRNodePool<T>(factory, reset)
+  xrPoolRegistry.set(tag, pool as unknown as XRNodePool<AnyPoolableControl>)
+  return pool
+}
+
+export function getXRPool(tag: string): XRNodePool<AnyPoolableControl> | undefined {
+  return xrPoolRegistry.get(tag)
+}
+
+export function disposeAllXRPools(): void {
+  xrPoolRegistry.forEach(pool => pool.dispose())
+  xrPoolRegistry.clear()
+}

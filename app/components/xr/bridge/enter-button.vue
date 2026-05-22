@@ -1,5 +1,9 @@
 <template>
-  <button class="xr-enter-button" @click="handleClick" :disabled="isLoading">
+  <button
+    class="xr-enter-button"
+    :disabled="isLoading"
+    @click="handleClick"
+  >
     {{ isLoading ? 'Loading Engine...' : (isReady ? 'Enter WebXR' : 'Load WebXR') }}
   </button>
 </template>
