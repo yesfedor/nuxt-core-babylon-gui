@@ -25,33 +25,48 @@ onMounted(async () => {
 })
 
 const requestLoad = () => {
+  console.log('[SCOPE] requestLoad clicked')
   isXRLoadRequested.value = true
 }
 
 const onXRReady = async (enterXR: () => Promise<void>) => {
+  console.log('[SCOPE] onXRReady received')
   isXRReady.value = true
   
   // Автоматический вход в VR при первой загрузке (если браузер еще помнит клик пользователя)
   try {
+    console.log('[SCOPE] Attempting auto-enter XR...')
     await enterXR()
+    console.log('[SCOPE] Auto-enter XR succeeded')
   } catch (e) {
-    console.warn('Auto-enter failed (user gesture likely expired). Waiting for manual click.', e)
+    console.warn('[SCOPE] Auto-enter failed (user gesture likely expired). Waiting for manual click.', e)
     // Сохраняем коллбек, чтобы пользователь мог войти по второму клику
     enterXRCallback = enterXR
   }
 }
 
 const requestEnter = async () => {
+  console.log('[SCOPE] requestEnter clicked')
   if (enterXRCallback) {
-    await enterXRCallback()
+    try {
+      console.log('[SCOPE] Calling enterXRCallback...')
+      await enterXRCallback()
+      console.log('[SCOPE] enterXRCallback succeeded')
+    } catch (e) {
+      console.error('[SCOPE] enterXRCallback failed:', e)
+    }
+  } else {
+    console.error('[SCOPE] enterXRCallback is null!')
   }
 }
 
 const onSessionStarted = () => {
+  console.log('[SCOPE] onSessionStarted received')
   isXRActive.value = true
 }
 
 const onSessionEnded = () => {
+  console.log('[SCOPE] onSessionEnded received')
   isXRActive.value = false
 }
 </script>

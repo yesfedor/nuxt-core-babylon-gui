@@ -45,11 +45,11 @@ const slots = useSlots()
 const parent = getCurrentInstance()
 let xrApp: any = null
 
-const renderLoop = () => {
-  scene.value?.render()
-}
+  const renderLoop = () => {
+    scene.value?.render()
+  }
 
-onMounted(async () => {
+  onMounted(async () => {
   if (!renderCanvas.value) return
 
   engine.value = new BABYLON.Engine(renderCanvas.value, true)
@@ -67,13 +67,29 @@ onMounted(async () => {
   light.intensity = 0.7
 
   try {
-    xrHelper.value = await scene.value.createDefaultXRExperienceAsync({
-      uiOptions: {
-        sessionMode: 'immersive-vr',
-        referenceSpaceType: 'local-floor',
-      },
-      disableDefaultUI: true // Отключаем стандартную кнопку Babylon
-    })
+    try {
+      console.log('[PROVIDER] Requesting createDefaultXRExperienceAsync (AR)...')
+      xrHelper.value = await scene.value.createDefaultXRExperienceAsync({
+        uiOptions: {
+          sessionMode: 'immersive-ar', // Пробуем AR (Passthrough) сначала
+          referenceSpaceType: 'local-floor',
+        },
+        disableDefaultUI: true
+      })
+    } catch (e) {
+      console.log('[PROVIDER] AR not supported, falling back to VR')
+      // Если AR не поддерживается (например на десктопе), фоллбек на VR
+      xrHelper.value = await scene.value.createDefaultXRExperienceAsync({
+        uiOptions: {
+          sessionMode: 'immersive-vr',
+          referenceSpaceType: 'local-floor',
+        },
+        disableDefaultUI: true
+      })
+      
+      // В VR режиме делаем фон темным, чтобы не было видно "пустоты"
+      scene.value.clearColor = new BABYLON.Color4(0.1, 0.1, 0.15, 1)
+    }
 
     // Initialize XR Input Bridge and Dormant Mode logic
     useXR(scene.value, xrHelper.value)
@@ -108,30 +124,53 @@ onMounted(async () => {
 
     // Управляем циклом рендеринга только когда мы в XR
     xrHelper.value.baseExperience.onStateChangedObservable.add((state) => {
+      console.log('[PROVIDER] XR State changed:', state)
       if (state === BABYLON.WebXRState.IN_XR) {
+        console.log('[PROVIDER] IN_XR state reached')
         isXRActive.value = true
-        engine.value?.runRenderLoop(renderLoop)
         emit('session-started')
       } else if (state === BABYLON.WebXRState.NOT_IN_XR) {
+        console.log('[PROVIDER] NOT_IN_XR state reached')
         isXRActive.value = false
-        engine.value?.stopRenderLoop(renderLoop)
         emit('session-ended')
+      } else if (state === BABYLON.WebXRState.ENTERING_XR) {
+        console.log('[PROVIDER] Entering XR...')
+      } else if (state === BABYLON.WebXRState.EXITING_XR) {
+        console.log('[PROVIDER] Exiting XR...')
       }
     })
 
     // Рендерим один кадр для компиляции шейдеров
     scene.value.executeWhenReady(() => {
+      console.log('[PROVIDER] Scene executeWhenReady fired')
       scene.value?.render()
+      
+      // Запускаем постоянный рендер-луп, чтобы сцена обновлялась и реагировала на контроллеры
+      engine.value?.runRenderLoop(renderLoop)
+      
+      console.log('[PROVIDER] Emitting @ready with enterXR function')
       emit('ready', enterXR)
     })
   } catch (e) {
-    console.error('WebXR not supported or failed to initialize', e)
+    console.error('[PROVIDER] WebXR not supported or failed to initialize', e)
   }
 })
 
 const enterXR = async () => {
+  console.log('[PROVIDER] enterXR called!')
   if (xrHelper.value) {
-    await xrHelper.value.baseExperience.enterXRAsync('immersive-vr', 'local-floor')
+    try {
+      // Пытаемся войти в тот режим, который удалось инициализировать
+      const sessionMode = xrHelper.value.baseExperience.sessionManager.sessionMode || 'immersive-vr'
+      console.log(`[PROVIDER] Calling xrHelper.baseExperience.enterXRAsync(${sessionMode})...`)
+      await xrHelper.value.baseExperience.enterXRAsync(sessionMode, 'local-floor')
+      console.log('[PROVIDER] Successfully entered XR')
+    } catch (err) {
+      console.error('[PROVIDER] Failed to enter XR in enterXRAsync:', err)
+      throw err
+    }
+  } else {
+    console.error('[PROVIDER] xrHelper is null!')
   }
 }
 
@@ -164,6 +203,7 @@ onBeforeUnmount(() => {
   outline: none;
   opacity: 0;
   pointer-events: none; /* Запрещаем взаимодействие с канвасом до входа в XR */
+  transition: opacity 0.3s ease;
 }
 
 .xr-canvas.is-active {
